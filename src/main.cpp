@@ -1,110 +1,117 @@
 #include <Arduino.h>
-#include "ESP32-HUB75-MatrixPanel-I2S-DMA.h"
-#include <cJSON.h>
+#include <Adafruit_Protomatter.h>
+#include <ArduinoJson.h>
 
-#define PANEL_WIDTH 64
-#define PANEL_HEIGHT 32
+// For a 64x32 panel, one chain, example pin setup for MatrixPortal S3.
+#define WIDTH       64
+#define HEIGHT      32
+#define CHAIN       1
+#define BIT_DEPTH   4
 
-MatrixPanel_I2S_DMA *dma_display = nullptr;
+uint8_t rgbPins[] = {
+  42,
+  41,
+  40,
+  38,
+  39,
+  37,
+};
+uint8_t addrPins[] = {
+  45,
+  36,
+  48,
+  35,
+  21};
 
-void setup()
-{
-    Serial.begin(115200);
+uint8_t clockPin = 2;
+uint8_t latchPin = 47;
+uint8_t oePin = 14;
 
-    HUB75_I2S_CFG mxconfig;
-    mxconfig.mx_width  = PANEL_WIDTH;
-    mxconfig.mx_height = PANEL_HEIGHT;
-    // Configure pins or chain length here if needed:
-    // mxconfig.gpio_r1 = ...
-    // mxconfig.gpio_g1 = ...
-    // etc.
+Adafruit_Protomatter matrix(WIDTH, 6, 1, rgbPins, sizeof(addrPins) / sizeof(addrPins[0]), addrPins, clockPin, latchPin, oePin, false);
 
-    dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-    dma_display->begin();
-    dma_display->setPanelBrightness(64); 
-    dma_display->clearScreen();
+
+
+
+// Simple serial input buffer
+String incomingData;
+
+void setup() {
+  Serial.begin(115200);
+  matrix.begin();
+  matrix.fillScreen(0);
+  matrix.show();
 }
 
-void loop()
-{
-    static String inputBuffer;
+void drawCircleInPixels(int xPx, int yPx, int radiusPx, uint16_t color) {
+  // Simple midpoint circle or library method
+  // Here using Protomatter’s drawCircle() function
+  matrix.fillScreen(0);
+  matrix.drawCircle(xPx, yPx, radiusPx, color);
+  matrix.show();
+}
 
-    while (Serial.available() > 0) {
-      /*
-      Usage:
-      {"task":"/hub_act","x":0,"y":0,"diameter":10,"intensity":255,"r":255,"g":0,"b":0, "qid":0}
-      */
-        /*
-        Example JSON:
-        {
-            "task": "/hub_act",
-            "x": 0,
-            "y": 0,
-            "diameter": 10,
-            "intensity": 255,
-            "r": 255,
-            "g": 0,
-            "b": 0
-        }
-      */
-        char c = (char)Serial.read();
-        if (c == '\n') {
-            cJSON *root = cJSON_Parse(inputBuffer.c_str());
-            if (root) {
-                cJSON *taskItem = cJSON_GetObjectItem(root, "task");
-                if (taskItem && taskItem->valuestring && strcmp(taskItem->valuestring, "/hub_act") == 0) {
-                    cJSON *xItem        = cJSON_GetObjectItem(root, "x");
-                    cJSON *yItem        = cJSON_GetObjectItem(root, "y");
-                    cJSON *diameterItem = cJSON_GetObjectItem(root, "diameter");
-                    cJSON *intItem      = cJSON_GetObjectItem(root, "intensity");
-                    cJSON *rItem        = cJSON_GetObjectItem(root, "r");
-                    cJSON *gItem        = cJSON_GetObjectItem(root, "g");
-                    cJSON *bItem        = cJSON_GetObjectItem(root, "b");
-                    cJSON *qidItem      = cJSON_GetObjectItem(root, "qid");
+void handleJSON(const String &jsonString) {
+  // Use ArduinoJson
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, jsonString);
+  if (error) {
+    Serial.println("{\"status\":\"error\",\"info\":\"JSON parse failed\"}");
+    return;
+  }
 
-                    if (xItem && yItem && diameterItem && intItem && rItem && gItem && bItem) {
-                        int x         = xItem->valueint;
-                        int y         = yItem->valueint;
-                        int diameter  = diameterItem->valueint;
-                        int radius    = diameter / 2;
-                        int intensity = intItem->valueint;
-                        int red       = rItem->valueint;
-                        int green     = gItem->valueint;
-                        int blue      = bItem->valueint;
-                        int qid      = qidItem ? qidItem->valueint : 0;
+  // Check if task == /hub_act
+  const char* task = doc["task"];
+  if (!task) {
+    Serial.println("{\"status\":\"error\",\"info\":\"Missing task\"}");
+    return;
+  }
+  if (strcmp(task, "/hub_act") != 0) {
+    Serial.println("{\"status\":\"error\",\"info\":\"Unknown task\"}");
+    return;
+  }
 
-                        if (intensity < 0)   intensity = 0;
-                        if (intensity > 255) intensity = 255;
+  // Parse fields
+  float xMm     = doc["x"] | 0.0;
+  float yMm     = doc["y"] | 0.0;
+  int r         = doc["intensity"][0] | 255;
+  int g         = doc["intensity"][1] | 255;
+  int b         = doc["intensity"][2] | 255;
+  int radiusPx  = doc["radius"] | 2;
+  int qid       = doc["qid"]     | 0;
 
-                        dma_display->setPanelBrightness(intensity);
-                        uint16_t color = dma_display->color565(red, green, blue);
-                        dma_display->fillCircle(x, y, radius, color);
-                        log_i("Circle drawn at (%d, %d) with diameter %d and color (%d, %d, %d)", x, y, diameter, red, green, blue);
-                        // Optionally, you can send a response back to the sender
-                        // For example, you can send the qid back
-                        if (qidItem) {
-                            log_i("Response qid: %d", qid);
-                        }
-                    }
-                }
-                cJSON_Delete(root);
-                /* return:
-                ++
-                {"qid":-1,"success":-1}
-                --
-                */
-                cJSON *response = cJSON_CreateObject();
-                cJSON_AddNumberToObject(response, "qid", 0);
-                cJSON_AddNumberToObject(response, "success", 1);
-                char *responseString = cJSON_PrintUnformatted(response);
-                Serial.println(responseString);
-                free(responseString);
-                cJSON_Delete(response);
-            
-            }
-            inputBuffer = "";
-        } else {
-            inputBuffer += c;
-        }
+  // Convert mm to pixel coords (panel has 3mm pitch)
+  int xPx = round(xMm / 3.0f);
+  int yPx = round(yMm / 3.0f);
+
+  // Bounds check if you wish
+  if (xPx < 0 || xPx >= WIDTH || yPx < 0 || yPx >= HEIGHT) {
+    Serial.print("{\"task\":\"/hub_act\",\"status\":\"error\",\"qid\":");
+    Serial.print(qid);
+    Serial.println(",\"info\":\"Coordinates out of range\"}");
+    return;
+  }
+
+  // Convert color to 565
+  uint16_t color565 = matrix.color565(r, g, b);
+
+  // Draw
+  drawCircleInPixels(xPx, yPx, radiusPx, color565);
+
+  // Return success
+  Serial.print("{\"task\":\"/hub_act\",\"status\":\"success\",\"qid\":");
+  Serial.print(qid);
+  Serial.println("}");
+}
+
+void loop() {
+  // Accumulate incoming serial data
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n') {
+      handleJSON(incomingData);
+      incomingData = "";
+    } else {
+      incomingData += c;
     }
+  }
 }

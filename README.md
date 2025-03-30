@@ -17,10 +17,7 @@ This is used to have brightfield while providing a laser cover. Only those leds 
 
 ## Dependencies
 
-1. [ESP32-HUB75-MatrixPanel-I2S-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA)  
-2. [cJSON](https://github.com/DaveGamble/cJSON)
-
-Add these to `platformio.ini` under `lib_deps`.
+Look into `platformio.ini` under `lib_deps`.
 
 ## Usage
 
