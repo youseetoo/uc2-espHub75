@@ -6,7 +6,7 @@
 #define WIDTH       64
 #define HEIGHT      32
 #define CHAIN       1
-#define BIT_DEPTH   4
+#define BIT_DEPTH   2
 
 uint8_t rgbPins[] = {
   42,
@@ -27,7 +27,8 @@ uint8_t clockPin = 2;
 uint8_t latchPin = 47;
 uint8_t oePin = 14;
 
-Adafruit_Protomatter matrix(WIDTH, 6, 1, rgbPins, sizeof(addrPins) / sizeof(addrPins[0]), addrPins, clockPin, latchPin, oePin, false);
+Adafruit_Protomatter matrix(WIDTH, BIT_DEPTH, 1, rgbPins, 
+    sizeof(addrPins) / sizeof(addrPins[0]), addrPins, clockPin, latchPin, oePin, true);
 
 
 
@@ -39,6 +40,7 @@ void setup() {
   Serial.begin(115200);
   matrix.begin();
   matrix.fillScreen(0);
+  matrix.setDuty(4);
   matrix.show();
 }
 
@@ -46,7 +48,7 @@ void drawCircleInPixels(int xPx, int yPx, int radiusPx, uint16_t color) {
   // Simple midpoint circle or library method
   // Here using Protomatter’s drawCircle() function
   matrix.fillScreen(0);
-  matrix.drawCircle(xPx, yPx, radiusPx, color);
+  matrix.fillCircle(xPx, yPx, radiusPx, color);
   matrix.show();
 }
 
@@ -61,6 +63,7 @@ void handleJSON(const String &jsonString) {
 
   // Check if task == /hub_act
   const char* task = doc["task"];
+  // {"task":"/hub_act","x":100,"y":10,"intensity":[255,255,255],"radius":2,"qid":0}
   if (!task) {
     Serial.println("{\"status\":\"error\",\"info\":\"Missing task\"}");
     return;
@@ -84,6 +87,7 @@ void handleJSON(const String &jsonString) {
   int yPx = round(yMm / 3.0f);
 
   // Bounds check if you wish
+  /*
   if (xPx < 0 || xPx >= WIDTH || yPx < 0 || yPx >= HEIGHT) {
     Serial.print("{\"task\":\"/hub_act\",\"status\":\"error\",\"qid\":");
     Serial.print(qid);
